@@ -1,34 +1,41 @@
-const { Notification } = require('../models');
+// src/controllers/notification.controller.js
+const notifService = require("../services/notification.service");
 
-const getMyNotifications = async (req, res) => {
+const getMyNotifications = async (req, res, next) => {
   try {
-    const notifications = await Notification.findAll({
-      where: { user_id: req.user.id },
-      order: [['created_at', 'DESC']],
-      limit: 50,
-    });
-    res.json(notifications);
-  } catch (err) {
-    res.status(500).json({ message: 'Lỗi server', error: err.message });
+    res.json(await notifService.getMyNotifications(req.user.id, req.query));
+  } catch (e) {
+    next(e);
+  }
+};
+const getUnreadCount = async (req, res, next) => {
+  try {
+    const count = await notifService.getUnreadCount(req.user.id);
+    res.json({ unread_count: count });
+  } catch (e) {
+    next(e);
+  }
+};
+const markAsRead = async (req, res, next) => {
+  try {
+    await notifService.markAsRead(req.user.id, req.params.id);
+    res.json({ message: "Đã đánh dấu đọc" });
+  } catch (e) {
+    next(e);
+  }
+};
+const markAllAsRead = async (req, res, next) => {
+  try {
+    await notifService.markAllAsRead(req.user.id);
+    res.json({ message: "Đã đọc tất cả" });
+  } catch (e) {
+    next(e);
   }
 };
 
-const markAsRead = async (req, res) => {
-  try {
-    await Notification.update({ is_read: true }, { where: { id: req.params.id, user_id: req.user.id } });
-    res.json({ message: 'Đã đánh dấu đọc' });
-  } catch (err) {
-    res.status(500).json({ message: 'Lỗi server', error: err.message });
-  }
+module.exports = {
+  getMyNotifications,
+  getUnreadCount,
+  markAsRead,
+  markAllAsRead,
 };
-
-const markAllAsRead = async (req, res) => {
-  try {
-    await Notification.update({ is_read: true }, { where: { user_id: req.user.id } });
-    res.json({ message: 'Đã đọc tất cả' });
-  } catch (err) {
-    res.status(500).json({ message: 'Lỗi server', error: err.message });
-  }
-};
-
-module.exports = { getMyNotifications, markAsRead, markAllAsRead };

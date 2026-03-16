@@ -11,11 +11,15 @@
     "bcrypt": "^5.1.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "express": "^4.19.2",
+    "express": "^5.2.1",
     "jsonwebtoken": "^9.0.2",
-    "sequelize": "^6.37.3"
+    "mysql2": "^3.20.0",
+    "redis": "^5.11.0",
+    "sequelize": "^6.37.3",
+    "socket.io": "^4.8.3",
+    "winston": "^3.19.0"
   },
   "devDependencies": {
-    "nodemon": "^3.1.0"
+    "nodemon": "^3.1.14"
   }
 }

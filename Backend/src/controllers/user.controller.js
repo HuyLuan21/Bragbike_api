@@ -1,41 +1,39 @@
-const bcrypt = require('bcrypt');
-const { User } = require('../models');
+// src/controllers/user.controller.js
+const userService = require("../services/user.service");
 
-const getMe = async (req, res) => {
+const getMe = async (req, res, next) => {
   try {
-    const user = await User.findByPk(req.user.id, {
-      attributes: { exclude: ['password'] },
-    });
-    if (!user) return res.status(404).json({ message: 'Không tìm thấy user' });
-    res.json(user);
-  } catch (err) {
-    res.status(500).json({ message: 'Lỗi server', error: err.message });
+    res.json(await userService.getMe(req.user.id));
+  } catch (e) {
+    next(e);
   }
 };
 
-const updateMe = async (req, res) => {
-  const { full_name, email, avatar_url } = req.body;
+const updateMe = async (req, res, next) => {
   try {
-    await User.update({ full_name, email, avatar_url }, { where: { id: req.user.id } });
-    res.json({ message: 'Cập nhật thành công' });
-  } catch (err) {
-    res.status(500).json({ message: 'Lỗi server', error: err.message });
+    await userService.updateMe(req.user.id, req.body);
+    res.json({ message: "Cập nhật thành công" });
+  } catch (e) {
+    next(e);
   }
 };
 
-const changePassword = async (req, res) => {
-  const { old_password, new_password } = req.body;
+const changePassword = async (req, res, next) => {
   try {
-    const user  = await User.findByPk(req.user.id);
-    const match = await bcrypt.compare(old_password, user.password);
-    if (!match) return res.status(401).json({ message: 'Mật khẩu cũ không đúng' });
-
-    const hash = await bcrypt.hash(new_password, 10);
-    await User.update({ password: hash }, { where: { id: req.user.id } });
-    res.json({ message: 'Đổi mật khẩu thành công' });
-  } catch (err) {
-    res.status(500).json({ message: 'Lỗi server', error: err.message });
+    await userService.changePassword(req.user.id, req.body);
+    res.json({ message: "Đổi mật khẩu thành công" });
+  } catch (e) {
+    next(e);
   }
 };
 
-module.exports = { getMe, updateMe, changePassword };
+const updateAvatar = async (req, res, next) => {
+  try {
+    await userService.updateAvatar(req.user.id, req.body.avatar_url);
+    res.json({ message: "Cập nhật avatar thành công" });
+  } catch (e) {
+    next(e);
+  }
+};
+
+module.exports = { getMe, updateMe, changePassword, updateAvatar };

@@ -1,167 +1,262 @@
-const { User, Driver, Report, Notification, Ride, sequelize } = require('../models');
-const { fn, col, literal } = require('sequelize');
+const adminService = require("../services/admin.service");
 
-const getPendingReports = async (req, res) => {
+// Helper: bắt lỗi từ service (service throw { status, message })
+const handle = (fn) => async (req, res) => {
   try {
-    const reports = await Report.findAll({
-      where:   { status: 'PENDING' },
-      include: [
-        { model: User,   as: 'reporter', attributes: ['full_name','phone'] },
-        { model: Driver, as: 'driver',   include: [{ model: User, as: 'user', attributes: ['full_name'] }] },
-      ],
-      order: [['created_at', 'ASC']],
-    });
-    res.json(reports);
+    const result = await fn(req, res);
+    if (result !== undefined) res.json(result);
   } catch (err) {
-    res.status(500).json({ message: 'Lỗi server', error: err.message });
+    const status = err.status || 500;
+    res.status(status).json({ message: err.message || "Lỗi server" });
   }
 };
 
-const reviewReport = async (req, res) => {
-  const { status, admin_note } = req.body;
-  try {
-    await Report.update(
-      { status, admin_note, reviewed_by: req.user.id, reviewed_at: new Date() },
-      { where: { id: req.params.id } }
+// ─────────────────────────────────────────
+//  STATS
+// ─────────────────────────────────────────
+const getStats = handle(async (req, res) => {
+  return adminService.getStats();
+});
+
+const getRideStats = handle(async (req, res) => {
+  return adminService.getRideStats();
+});
+
+const getDriverStats = handle(async (req, res) => {
+  return adminService.getDriverStats();
+});
+
+// ─────────────────────────────────────────
+//  DRIVER APPLICATIONS
+// ─────────────────────────────────────────
+const getDriverApplications = handle(async (req, res) => {
+  return adminService.getDriverApplications(req.query.status);
+});
+
+const getDriverApplicationById = handle(async (req, res) => {
+  return adminService.getDriverApplicationById(req.params.id);
+});
+
+const approveDriverApplication = handle(async (req, res) => {
+  await adminService.approveDriverApplication(
+    req.params.id,
+    req.body,
+    req.user.id,
+  );
+  res.json({ message: "Đã duyệt đơn, tài khoản tài xế đã được tạo" });
+});
+
+const rejectDriverApplication = handle(async (req, res) => {
+  await adminService.rejectDriverApplication(
+    req.params.id,
+    req.body,
+    req.user.id,
+  );
+  res.json({ message: "Đã từ chối đơn" });
+});
+
+// Alias giữ tương thích route cũ PATCH /driver-applications/:id
+const reviewDriverApplication = handle(async (req, res) => {
+  const { status } = req.body;
+  if (status === "APPROVED") {
+    await adminService.approveDriverApplication(
+      req.params.id,
+      req.body,
+      req.user.id,
     );
-    res.json({ message: 'Đã xử lý tố cáo' });
-  } catch (err) {
-    res.status(500).json({ message: 'Lỗi server', error: err.message });
-  }
-};
-
-const lockDriver = async (req, res) => {
-  const { reason, report_id } = req.body;
-  try {
-    const driver = await Driver.findByPk(req.params.id);
-    if (!driver) return res.status(404).json({ message: 'Không tìm thấy tài xế' });
-
-    await driver.update({ is_locked: true, locked_at: new Date(), locked_reason: reason });
-    await sequelize.query(
-      'INSERT INTO driver_lock_history (driver_id, locked_by, reason, report_id) VALUES (?,?,?,?)',
-      { replacements: [driver.id, req.user.id, reason, report_id || null] }
+    res.json({ message: "Đã duyệt đơn" });
+  } else if (status === "REJECTED") {
+    await adminService.rejectDriverApplication(
+      req.params.id,
+      req.body,
+      req.user.id,
     );
-    await Notification.create({
-      user_id: driver.user_id,
-      title:   'Tài khoản bị khóa',
-      body:    `Lý do: ${reason}`,
-      type:    'LOCK',
-      ref_id:  driver.id,
-    });
-    res.json({ message: 'Đã khóa tài xế' });
-  } catch (err) {
-    res.status(500).json({ message: 'Lỗi server', error: err.message });
+    res.json({ message: "Đã từ chối đơn" });
+  } else {
+    res.status(400).json({ message: "status phải là APPROVED hoặc REJECTED" });
   }
-};
+});
 
-const unlockDriver = async (req, res) => {
-  try {
-    await Driver.update(
-      { is_locked: false, locked_at: null, locked_reason: null },
-      { where: { id: req.params.id } }
-    );
-    await sequelize.query(
-      'UPDATE driver_lock_history SET unlocked_at = NOW() WHERE driver_id = ? AND unlocked_at IS NULL',
-      { replacements: [req.params.id] }
-    );
-    res.json({ message: 'Đã mở khóa tài xế' });
-  } catch (err) {
-    res.status(500).json({ message: 'Lỗi server', error: err.message });
+// ─────────────────────────────────────────
+//  DRIVERS
+// ─────────────────────────────────────────
+const getAllDrivers = handle(async (req, res) => {
+  return adminService.getAllDrivers(req.query);
+});
+
+const getDriverById = handle(async (req, res) => {
+  return adminService.getDriverById(req.params.id);
+});
+
+const lockDriver = handle(async (req, res) => {
+  await adminService.lockDriver(req.params.id, req.body, req.user.id);
+  res.json({ message: "Đã khóa tài xế" });
+});
+
+const unlockDriver = handle(async (req, res) => {
+  await adminService.unlockDriver(req.params.id);
+  res.json({ message: "Đã mở khóa tài xế" });
+});
+
+// ─────────────────────────────────────────
+//  REPORTS
+// ─────────────────────────────────────────
+const getPendingReports = handle(async (req, res) => {
+  return adminService.getPendingReports(req.query.status);
+});
+
+const getReportById = handle(async (req, res) => {
+  return adminService.getReportById(req.params.id);
+});
+
+const reviewReport = handle(async (req, res) => {
+  await adminService.reviewReport(req.params.id, req.body, req.user.id);
+  res.json({ message: "Đã xử lý báo cáo" });
+});
+
+// ─────────────────────────────────────────
+//  APPEALS
+// ─────────────────────────────────────────
+const getPendingAppeals = handle(async (req, res) => {
+  return adminService.getPendingAppeals(req.query.status);
+});
+
+const getAppealById = handle(async (req, res) => {
+  return adminService.getAppealById(req.params.id);
+});
+
+const approveAppeal = handle(async (req, res) => {
+  await adminService.approveAppeal(req.params.id, req.body, req.user.id);
+  res.json({ message: "Đã chấp nhận kháng cáo, tài xế được mở khóa" });
+});
+
+const rejectAppeal = handle(async (req, res) => {
+  await adminService.rejectAppeal(req.params.id, req.body, req.user.id);
+  res.json({ message: "Đã từ chối kháng cáo" });
+});
+
+// Alias route cũ PATCH /appeals/:id
+const reviewAppeal = handle(async (req, res) => {
+  const { status } = req.body;
+  if (status === "APPROVED") {
+    await adminService.approveAppeal(req.params.id, req.body, req.user.id);
+    res.json({ message: "Đã chấp nhận kháng cáo" });
+  } else if (status === "REJECTED") {
+    await adminService.rejectAppeal(req.params.id, req.body, req.user.id);
+    res.json({ message: "Đã từ chối kháng cáo" });
+  } else {
+    res.status(400).json({ message: "status phải là APPROVED hoặc REJECTED" });
   }
-};
+});
 
-const getPendingAppeals = async (req, res) => {
-  try {
-    const [appeals] = await sequelize.query(
-      `SELECT da.*, u.full_name as driver_name, u.phone as driver_phone
-       FROM driver_appeals da
-       JOIN drivers d ON da.driver_id = d.id
-       JOIN users u ON d.user_id = u.id
-       WHERE da.status = 'PENDING' ORDER BY da.created_at ASC`
-    );
-    res.json(appeals);
-  } catch (err) {
-    res.status(500).json({ message: 'Lỗi server', error: err.message });
-  }
-};
+// ─────────────────────────────────────────
+//  PRICING
+// ─────────────────────────────────────────
+const getAllPricing = handle(async (req, res) => {
+  return adminService.getAllPricing();
+});
 
-const reviewAppeal = async (req, res) => {
-  const { status, admin_response } = req.body;
-  try {
-    await sequelize.query(
-      'UPDATE driver_appeals SET status=?, admin_response=?, reviewed_by=?, reviewed_at=NOW() WHERE id=?',
-      { replacements: [status, admin_response, req.user.id, req.params.id] }
-    );
-    if (status === 'APPROVED') {
-      const [[appeal]] = await sequelize.query('SELECT driver_id FROM driver_appeals WHERE id=?', { replacements: [req.params.id] });
-      await Driver.update({ is_locked: false, locked_at: null, locked_reason: null }, { where: { id: appeal.driver_id } });
-      await sequelize.query(
-        'UPDATE driver_lock_history SET unlocked_at=NOW() WHERE driver_id=? AND unlocked_at IS NULL',
-        { replacements: [appeal.driver_id] }
-      );
-    }
-    res.json({ message: 'Đã xử lý kháng cáo' });
-  } catch (err) {
-    res.status(500).json({ message: 'Lỗi server', error: err.message });
-  }
-};
+const updatePricing = handle(async (req, res) => {
+  const data = await adminService.updatePricing(
+    req.params.vehicleType,
+    req.body,
+  );
+  res.json({ message: "Đã cập nhật bảng giá", data });
+});
 
-const getDriverApplications = async (req, res) => {
-  try {
-    const [apps] = await sequelize.query(
-      `SELECT da.*, u.full_name, u.phone FROM driver_applications da
-       JOIN users u ON da.user_id = u.id WHERE da.status='PENDING' ORDER BY da.submitted_at ASC`
-    );
-    res.json(apps);
-  } catch (err) {
-    res.status(500).json({ message: 'Lỗi server', error: err.message });
-  }
-};
+// ─────────────────────────────────────────
+//  PEAK HOURS
+// ─────────────────────────────────────────
+const getPeakHours = handle(async (req, res) => {
+  return adminService.getPeakHours();
+});
 
-const reviewDriverApplication = async (req, res) => {
-  const { status, rejection_reason, vehicle_type, vehicle_name, license_plate } = req.body;
-  try {
-    const [[app]] = await sequelize.query('SELECT * FROM driver_applications WHERE id=?', { replacements: [req.params.id] });
-    if (!app) return res.status(404).json({ message: 'Không tìm thấy đơn' });
+const createPeakHour = handle(async (req, res) => {
+  const peak = await adminService.createPeakHour(req.body);
+  res.status(201).json(peak);
+});
 
-    await sequelize.query(
-      'UPDATE driver_applications SET status=?, rejection_reason=?, reviewed_by=?, reviewed_at=NOW() WHERE id=?',
-      { replacements: [status, rejection_reason || null, req.user.id, req.params.id] }
-    );
-    if (status === 'APPROVED') {
-      await Driver.create({ user_id: app.user_id, vehicle_type, vehicle_name, license_plate });
-      await User.update({ role: 'DRIVER' }, { where: { id: app.user_id } });
-    }
-    res.json({ message: `Đã ${status === 'APPROVED' ? 'duyệt' : 'từ chối'} đơn` });
-  } catch (err) {
-    res.status(500).json({ message: 'Lỗi server', error: err.message });
-  }
-};
+const updatePeakHour = handle(async (req, res) => {
+  return adminService.updatePeakHour(req.params.id, req.body);
+});
 
-const getStats = async (req, res) => {
-  try {
-    const totalUsers   = await User.count({ where: { role: 'USER' } });
-    const totalDrivers = await Driver.count();
-    const totalRides   = await Ride.count({ where: { status: 'COMPLETED' } });
-    const revenue      = await Ride.sum('total_price', { where: { status: 'COMPLETED' } });
-    const pendingRep   = await Report.count({ where: { status: 'PENDING' } });
+const deletePeakHour = handle(async (req, res) => {
+  await adminService.deletePeakHour(req.params.id);
+  res.json({ message: "Đã xóa khung giờ cao điểm" });
+});
 
-    res.json({
-      total_users:     totalUsers,
-      total_drivers:   totalDrivers,
-      total_rides:     totalRides,
-      total_revenue:   revenue || 0,
-      pending_reports: pendingRep,
-    });
-  } catch (err) {
-    res.status(500).json({ message: 'Lỗi server', error: err.message });
-  }
-};
+// ─────────────────────────────────────────
+//  USERS
+// ─────────────────────────────────────────
+const getAllUsers = handle(async (req, res) => {
+  return adminService.getAllUsers(req.query);
+});
+
+const getUserById = handle(async (req, res) => {
+  return adminService.getUserById(req.params.id);
+});
+
+const deactivateUser = handle(async (req, res) => {
+  await adminService.deactivateUser(req.params.id);
+  res.json({ message: "Đã vô hiệu hóa tài khoản" });
+});
+
+const activateUser = handle(async (req, res) => {
+  await adminService.activateUser(req.params.id);
+  res.json({ message: "Đã kích hoạt lại tài khoản" });
+});
+
+// ─────────────────────────────────────────
+//  RIDES
+// ─────────────────────────────────────────
+const getAllRides = handle(async (req, res) => {
+  return adminService.getAllRides(req.query);
+});
+
+const getRideById = handle(async (req, res) => {
+  return adminService.getRideById(req.params.id);
+});
 
 module.exports = {
-  getPendingReports, reviewReport,
-  lockDriver, unlockDriver,
-  getPendingAppeals, reviewAppeal,
-  getDriverApplications, reviewDriverApplication,
+  // Stats
   getStats,
+  getRideStats,
+  getDriverStats,
+  // Driver applications
+  getDriverApplications,
+  getDriverApplicationById,
+  approveDriverApplication,
+  rejectDriverApplication,
+  reviewDriverApplication,
+  // Drivers
+  getAllDrivers,
+  getDriverById,
+  lockDriver,
+  unlockDriver,
+  // Reports
+  getPendingReports,
+  getReportById,
+  reviewReport,
+  // Appeals
+  getPendingAppeals,
+  getAppealById,
+  approveAppeal,
+  rejectAppeal,
+  reviewAppeal,
+  // Pricing
+  getAllPricing,
+  updatePricing,
+  // Peak hours
+  getPeakHours,
+  createPeakHour,
+  updatePeakHour,
+  deletePeakHour,
+  // Users
+  getAllUsers,
+  getUserById,
+  deactivateUser,
+  activateUser,
+  // Rides
+  getAllRides,
+  getRideById,
 };
