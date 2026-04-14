@@ -1,0 +1,19 @@
+.env
+.env.local
+.env.production
+
+node_modules/
+
+logs/
+*.log
+npm-debug.log*
+
+
+dist/
+build/
+
+.DS_Store        # macOS
+Thumbs.db        # Windows
+
+.vscode/
+.idea/
